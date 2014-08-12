@@ -37,6 +37,8 @@ rx_callid = re.compile("Call-ID: (.*)$")
 rx_request_uri = re.compile("^([^ ]*) sip:([^ ]*) SIP/2.0")
 rx_route = re.compile("^Route:")
 rx_contentlength = re.compile("^Content-Length:")
+rx_via = re.compile("^Via:")
+rx_branch = re.compile(";branch=([^;]*)")
 
 # global dictionnary
 recordroute = ""
@@ -131,7 +133,12 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         destination = ""
         origin = ""
         callid = ""
+        branch = ""
         for line in self.data:
+            if rx_via.search(line):
+                md = rx_branch.search(line)
+                if md:
+                    branch = md.group(1)
             if rx_to.search(line):
                 md = rx_uri.search(line)
                 if md:
@@ -143,7 +150,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             md = rx_callid.search(line)
             if md:
                 callid = md.group(1)
-        return (origin, destination, callid)
+        return (origin, destination, callid, branch)
         
     def sendResponse(self,code):
         request_uri = "SIP/2.0 " + code
@@ -202,7 +209,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         #text = string.join(self.data,"\n")
         #print text
         #rr = ""
-        origin,destination,callid = self.parseRequest()
+        origin,destination,callid,branch = self.parseRequest()
         # if len(origin) > 0:
         #   print "origin %s" % origin
         #   if registrar.has_key(origin):
@@ -228,7 +235,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 else:
                     print "create %s" % tag
                     self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    context[tag]=[self.sock,addr,port]
+                    context[tag]=[self.sock,addr,port,branch]
                     t = UpStream(self.sock,self.socket,self.client_address)
                     t.daemon = True
                     t.start()
@@ -250,26 +257,31 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         print "--------------"
         print " ACK received "
         print "--------------"
-        origin,destination,callid = self.parseRequest()
+        origin,destination,callid,branch = self.parseRequest()
         tag = "%s#%s" % (origin,callid)
         if context.has_key(tag):
-            self.sock,addr,port = context[tag]
+            self.sock,addr,port,invitebranch = context[tag]
             print "Send ACK to %s:%s" %(addr,port)
             self.data.insert(1,recordroute)
             text = string.join(self.data,"\r\n")
             self.sock.sendto(text , (addr, port))
             print "---\n<< client send:\n%s\n---" % text
-            #self.sock.close()
+            # detect ACK after failure (4xx 5xx 6xx)
+            if (invitebranch == branch):
+                print "delete %s" % tag
+                del context[tag]
+                self.sock.close()
+                self.sock = None
             
            
     def processCancel(self):
         print "-----------------"
         print " CANCEL received "
         print "-----------------"
-        origin,destination,callid = self.parseRequest()
+        origin,destination,callid,branch = self.parseRequest()
         tag = "%s#%s" % (origin,callid)
         if context.has_key(tag):
-            self.sock,addr,port = context[tag]
+            self.sock,addr,port,branch = context[tag]
             print "Send Other to %s:%s" %(addr,port)
             self.data.insert(1,recordroute)
             text = string.join(self.data,"\r\n")
@@ -282,7 +294,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         print "----------------------"
         print " Transaction received "
         print "----------------------"
-        origin,destination,callid = self.parseRequest()
+        origin,destination,callid,branch = self.parseRequest()
         #if len(origin) > 0:
         #print "origin %s" % origin
         #if registrar.has_key(origin):
@@ -308,7 +320,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 else:
                     print "create %s" % tag
                     self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    context[tag]=[self.sock,addr,port]
+                    context[tag]=[self.sock,addr,port,branch]
                     t = UpStream(self.sock,self.socket,self.client_address)
                     t.daemon = True
                     t.start()
