@@ -196,9 +196,9 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             data.append(line)
             if rx_to.search(line):
                 if not rx_tag.search(line):
-                    self.data[index] = "%s%s" % (line,";tag=123456")
+                    data[index] = "%s%s" % (line,";tag=123456")
             if rx_contentlength.search(line):
-                self.data[index]="Content-Length: 0"
+                data[index]="Content-Length: 0"
             index += 1
             if line == "":
                 break
@@ -420,19 +420,19 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         #print "handle"
         #print self.server
         #socket.setdefaulttimeout(120)
-        self.data = self.request[0].split("\r\n")
+        data = self.request[0]
+        self.data = data.split("\r\n")
         self.socket = self.request[1]
         request_uri = self.data[0]
         if rx_request_uri.search(request_uri) or rx_code.search(request_uri):
             showtime()
-            request = self.request[0]
-            print "---\n>> server received [%d]:\n%s\n---" %  (len(request),request)
+            print "---\n>> server received [%d]:\n%s\n---" %  (len(data),data)
             self.processRequest()
         else:
-            if len(self.request[0]) != 4:
+            if len(data) != 4:
                 showtime()
-                print "---\n>> server received [%d]:" % len(self.request[0])
-                hexdump(self.request[0],' ',16)
+                print "---\n>> server received [%d]:" % len(data)
+                hexdump(data,' ',16)
                 print "---"
 
     """
