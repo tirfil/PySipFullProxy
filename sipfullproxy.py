@@ -44,7 +44,7 @@ rx_branch = re.compile(";branch=([^;]*)")
 # global dictionnary
 recordroute = ""
 registrar = {}
-context = {}
+#context = {}
 
 def hexdump( chars, sep, width ):
     while chars:
@@ -57,89 +57,7 @@ def quotechars( chars ):
 	return ''.join( ['.', c][c.isalnum()] for c in chars )
 
 def showtime():
-    print time.strftime("(%H:%M:%S)", time.gmtime())
-
-class UpStream(threading.Thread):
-    def __init__(self, csock, ssock,client_address):
-        threading.Thread.__init__(self)
-        self.csock = csock
-        self.ssock = ssock
-        self.client_address = client_address
-    def run(self):
-        callid = ""
-        try:
-            received = self.csock.recv(8192)
-        except socket.timeout:
-            print "socket timeout"
-            received = None
-        while received:
-            
-            lines = received.split("\r\n")
-            request_uri = lines[0]
-            if rx_request_uri.search(request_uri) or rx_code.search(request_uri):
-                showtime()
-                print "---\n>> client received [%d]:\n%s\n---" % (len(received),received)
-            else:
-                if len(received) != 4:
-                    showtime()
-                    print "---\n>> client received [%d]:" % len(received)
-                    hexdump(received,' ',16)
-                    print "---"
-            disconnect = False
-            code = False
-            data = []
-            for line in lines:
-                if rx_to.search(line):
-                    md = rx_uri.search(line)
-                    if md:
-                        destination = "%s@%s" %(md.group(1),md.group(2))
-                if rx_from.search(line):
-                    md = rx_uri.search(line)
-                    if md:
-                        origin = "%s@%s" %(md.group(1),md.group(2))
-                md = rx_callid.search(line)
-                if md:
-                    callid = md.group(1)
-                md = rx_code.search(line)
-                if md:
-                    if int(md.group(1)) > 199:
-                        code = True
-                if code and rx_cseq.search(line):
-                    if rx_bye_cseq.search(line) or rx_cancel_cseq.search(line):
-                        disconnect = True
-                #if not rx_rr.search(line):
-                data.append(line)
-            received =  string.join(data,"\r\n")
-
-            request_uri = data[0]
-            if rx_request_uri.search(request_uri) or rx_code.search(request_uri):
-                showtime()
-                print "---\n>> server send [%d]:\n%s\n---" % (len(received),received)
-            else:
-                if len(received) != 4:
-                    showtime()
-                    print "---\n>> server send [%d]:" % len(received)
-                    hexdump(received,' ',16)
-                    print "---"
-            self.ssock.sendto(received,self.client_address)            
-            if disconnect == False:
-                try:
-                    received = self.csock.recv(8192)
-                except socket.timeout:
-                    print "socket timeout"
-                    break
-            else:
-                print "disconnected client received"
-                break    
-        tag = "%s#%s" % (origin,callid)
-        print "delete %s" % tag
-        if len(tag) > 0:
-            if context.has_key(tag):
-                del context[tag]
-        self.csock.close()
-        self.csock = None
-
-
+    print time.strftime("(%H:%M:%S)", time.localtime())
 
 class UDPHandler(SocketServer.BaseRequestHandler):   
     
@@ -147,13 +65,13 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         print "\n*** REGISTRAR ***"
         print "*****************"
         for key in registrar.keys():
-            print "%s -> %s" % (key,registrar[key])
+            print "%s -> %s" % (key,registrar[key][0])
         print "*****************"
         
     def uriToAddress(self,uri):
         addr = ""
         port = 0
-        addrport = registrar[uri]
+        addrport, socket, client_addr = registrar[uri]
         md = rx_addrport.match(addrport)
         if md:
             addr = md.group(1)
@@ -161,7 +79,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         else:
             addr = addrport
             port = 5060
-        return (addr,port)
+        return (addr,port,socket, client_addr)
         
                     
     def parseRequest(self):
@@ -233,7 +151,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         else:
             print "From: %s - Contact: %s" % (fromm,contact)
             print "Client address: %s:%s" % self.client_address
-            registrar[fromm]=contact
+            registrar[fromm]=[contact,self.socket,self.client_address]
             self.debugRegister()
             self.sendResponse("200 0K")
         
@@ -241,19 +159,11 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         print "-----------------"
         print " INVITE received "
         print "-----------------"
-        #text = string.join(self.data,"\n")
-        #print text
-        #rr = ""
         origin,destination,callid,branch = self.parseRequest()
-        # if len(origin) > 0:
-        #   print "origin %s" % origin
-        #   if registrar.has_key(origin):
-        #   addrport = registrar[origin]
-        #   rr = "Record-Route: <sip:%s;lr>" % addrport
         if len(destination) > 0:
             print "destination %s" % destination
             if registrar.has_key(destination):
-                addr,port = self.uriToAddress(destination)
+                addr,port,socket,claddr = self.uriToAddress(destination)
                 print "Send INVITE to %s:%s" %(addr,port)
                 # change request uri
                 #md = rx_request_uri.search(self.data[0])
@@ -263,17 +173,6 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 #    if registrar.has_key(uri):
                 #        uri = "sip:%s" % registrar[uri]
                 #        self.data[0] = "%s %s SIP/2.0" % (method,uri)
-                tag = "%s#%s" % (origin,callid)
-                if context.has_key(tag):
-                    print "reuse %s" % tag
-                    self.sock = context[tag][0]
-                else:
-                    print "create %s" % tag
-                    self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    context[tag]=[self.sock,addr,port,branch]
-                    t = UpStream(self.sock,self.socket,self.client_address)
-                    t.daemon = True
-                    t.start()
                 # delete Route
                 data = []
                 for line in self.data:
@@ -282,9 +181,9 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 #insert Record-Route
                 data.insert(1,recordroute)
                 text = string.join(data,"\r\n")
-                self.sock.sendto(text , (addr, port))
+                socket.sendto(text , claddr)
                 showtime()
-                print "---\n<< client send [%d]:\n%s\n---" % (len(text),text)
+                print "---\n<< server send [%d]:\n%s\n---" % (len(text),text)
                 
             else:
                 self.sendResponse("480 Temporarily Unavailable")
@@ -294,54 +193,52 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         print " ACK received "
         print "--------------"
         origin,destination,callid,branch = self.parseRequest()
-        tag = "%s#%s" % (origin,callid)
-        if context.has_key(tag):
-            self.sock,addr,port,invitebranch = context[tag]
-            print "Send ACK to %s:%s" %(addr,port)
-            self.data.insert(1,recordroute)
-            text = string.join(self.data,"\r\n")
-            self.sock.sendto(text , (addr, port))
-            showtime()
-            print "---\n<< client send [%d]:\n%s\n---" % (len(text),text)
-            # detect ACK after failure (4xx 5xx 6xx)
-            if (invitebranch == branch):
-                print "delete %s" % tag
-                del context[tag]
-                self.sock.close()
-                self.sock = None
-            
-           
+        if len(destination) > 0:
+            print "destination %s" % destination
+            if registrar.has_key(destination):
+                addr,port,socket,claddr = self.uriToAddress(destination)
+                # delete Route
+                data = []
+                for line in self.data:
+                    if not rx_route.search(line):
+                        data.append(line)
+                data.insert(1,recordroute)
+                text = string.join(data,"\r\n")
+                socket.sendto(text,claddr)
+                showtime()
+                print "---\n<< server send [%d]:\n%s\n---" % (len(text),text)
+                
     def processCancel(self):
         print "-----------------"
         print " CANCEL received "
         print "-----------------"
         origin,destination,callid,branch = self.parseRequest()
-        tag = "%s#%s" % (origin,callid)
-        if context.has_key(tag):
-            self.sock,addr,port,branch = context[tag]
-            print "Send Other to %s:%s" %(addr,port)
-            self.data.insert(1,recordroute)
-            text = string.join(self.data,"\r\n")
-            self.sock.sendto(text , (addr, port))
-            showtime()
-            print "---\n<< client send [%d]:\n%s\n---" % (len(text),text)   
-        else:
-            self.sendResponse("404 Not Found")  
-            
+        if len(destination) > 0:
+            print "destination %s" % destination
+            if registrar.has_key(destination):
+                addr,port,socket,claddr = self.uriToAddress(destination)
+               # delete Route
+                data = []
+                for line in self.data:
+                    if not rx_route.search(line):
+                        data.append(line)
+                data.insert(1,recordroute)
+                text = string.join(data,"\r\n")
+                socket.sendto(text,claddr)
+                showtime()
+                print "---\n<< server send [%d]:\n%s\n---" % (len(text),text)
+                return
+        self.sendResponse("404 Not Found")
+                
     def processTransaction(self):
         print "----------------------"
         print " Transaction received "
         print "----------------------"
         origin,destination,callid,branch = self.parseRequest()
-        #if len(origin) > 0:
-        #print "origin %s" % origin
-        #if registrar.has_key(origin):
-        #    addrport = registrar[origin]
-        #    rr = "Record-Route: <sip:%s;lr>" % addrport
         if len(destination) > 0:
             print "destination %s" % destination
             if registrar.has_key(destination):
-                addr,port = self.uriToAddress(destination)
+                addr,port,socket,claddr = self.uriToAddress(destination)
                 print "Send Transaction to %s:%s" %(addr,port)
                 # change request uri
                 # md = rx_request_uri.search(self.data[0])
@@ -351,17 +248,6 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 # if registrar.has_key(uri):
                 # uri = "sip:%s" % registrar[uri]
                 # self.data[0] = "%s %s SIP/2.0" % (method,uri)
-                tag = "%s#%s" % (origin,callid)
-                if context.has_key(tag):
-                    print "reuse %s" % tag
-                    self.sock = context[tag][0]
-                else:
-                    print "create %s" % tag
-                    self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    context[tag]=[self.sock,addr,port,branch]
-                    t = UpStream(self.sock,self.socket,self.client_address)
-                    t.daemon = True
-                    t.start()
                 # delete Route
                 data = []
                 for line in self.data:
@@ -370,12 +256,29 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 #insert Record-Route
                 data.insert(1,recordroute)
                 text = string.join(data,"\r\n")
-                self.sock.sendto(text , (addr, port))
+                socket.sendto(text , claddr)
                 showtime()
-                print "---\n<< client send [%d]:\n%s\n---" % (len(text),text)    
+                print "---\n<< server send [%d]:\n%s\n---" % (len(text),text)    
             else:
                 self.sendResponse("406 Not Acceptable")
-
+                
+    def processCode(self):
+        origin,destination,callid,branch = self.parseRequest()
+        if len(origin) > 0:
+            print "origin %s" % origin
+            if registrar.has_key(origin):
+                addr,port,socket,claddr = self.uriToAddress(origin)
+                # delete Route
+                data = []
+                for line in self.data:
+                    if not rx_route.search(line):
+                        data.append(line)
+                #data.insert(1,recordroute)
+                text = string.join(data,"\r\n")
+                socket.sendto(text,claddr)
+                showtime()
+                print "---\n<< server send [%d]:\n%s\n---" % (len(text),text)
+                
     def processRequest(self):
         #print "processRequest"
         if len(self.data) > 0:
@@ -405,7 +308,8 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             elif rx_notify.search(request_uri):
                 self.sendResponse("200 0K")
             elif rx_code.search(request_uri):
-                print "unexpected code: %s" % request_uri
+                self.processCode()
+                #print "unexpected code: %s" % request_uri
             else:
                 print "request_uri %s"     % request_uri          
                 #print "message %s unknown" % self.data
@@ -442,7 +346,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         #self.socket.close()
     """
 if __name__ == "__main__":    
-    print time.strftime("%a, %d %b %Y %H:%M:%S ", time.gmtime())
+    print time.strftime("%a, %d %b %Y %H:%M:%S ", time.localtime())
     #HOST, PORT = "127.0.0.1", 5060
     hostname = socket.gethostname()
     print hostname
