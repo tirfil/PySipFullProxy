@@ -184,6 +184,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         contact_expires = ""
         header_expires = ""
         expires = 0
+        validity = 0
         size = len(self.data)
         for line in self.data:
             if rx_to.search(line):
@@ -213,6 +214,8 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         if expires == 0:
             if registrar.has_key(fromm):
                 del registrar[fromm]
+                self.sendResponse("200 0K")
+                return
         else:
             now = int(time.time())
             validity = now + expires
