@@ -2,7 +2,7 @@ import SocketServer
 import re
 import string
 import socket
-import threading
+#import threading
 import sys
 import time
 
@@ -10,9 +10,7 @@ rx_register = re.compile("^REGISTER")
 rx_invite = re.compile("^INVITE")
 rx_ack = re.compile("^ACK")
 rx_cancel = re.compile("^CANCEL")
-rx_cancel_cseq = re.compile("CANCEL")
 rx_bye = re.compile("^BYE")
-rx_bye_cseq = re.compile("BYE")
 rx_options = re.compile("^OPTIONS")
 rx_subscribe = re.compile("^SUBSCRIBE")
 rx_publish = re.compile("^PUBLISH")
@@ -26,25 +24,22 @@ rx_tag = re.compile(";tag")
 rx_contact = re.compile("^Contact:")
 rx_uri = re.compile("sip:([^@]*)@([^;>$]*)")
 rx_addr = re.compile("sip:([^ ;>$]*)")
-rx_addrport = re.compile("([^:]*):(.*)")
+#rx_addrport = re.compile("([^:]*):(.*)")
 rx_code = re.compile("^SIP/2.0 ([^ ]*)")
 rx_invalid = re.compile("^192\.168")
 rx_invalid2 = re.compile("^10\.")
-rx_cseq = re.compile("^CSeq:")
-rx_callid = re.compile("Call-ID: (.*)$")
+#rx_cseq = re.compile("^CSeq:")
+#rx_callid = re.compile("Call-ID: (.*)$")
 #rx_rr = re.compile("^Record-Route:")
-# Linphone bug
-#rx_rr = re.compile("^Record-.oute:")
 rx_request_uri = re.compile("^([^ ]*) sip:([^ ]*) SIP/2.0")
 rx_route = re.compile("^Route:")
 rx_contentlength = re.compile("^Content-Length:")
-rx_via = re.compile("^Via:")
-rx_branch = re.compile(";branch=([^;]*)")
+#rx_via = re.compile("^Via:")
+#rx_branch = re.compile(";branch=([^;]*)")
 
 # global dictionnary
 recordroute = ""
 registrar = {}
-#context = {}
 
 def hexdump( chars, sep, width ):
     while chars:
@@ -67,7 +62,8 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         for key in registrar.keys():
             print "%s -> %s" % (key,registrar[key][0])
         print "*****************"
-        
+      
+    """
     def uriToAddress(self,uri):
         addr = ""
         port = 0
@@ -80,8 +76,50 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             addr = addrport
             port = 5060
         return (addr,port,socket, client_addr)
+    """
+    def changeRequestUri(self):
+        # change request uri
+        md = rx_request_uri.search(self.data[0])
+        if md:
+            method = md.group(1)
+            uri = md.group(2)
+            if registrar.has_key(uri):
+                uri = "sip:%s" % registrar[uri][0]
+                self.data[0] = "%s %s SIP/2.0" % (method,uri)
         
-                    
+    def removeRouteHeader(self):
+        # delete Route
+        data = []
+        for line in self.data:
+            if not rx_route.search(line):
+                data.append(line)
+        return data
+    
+    def getSocketInfo(self,uri):
+        addrport, socket, client_addr = registrar[uri]
+        return (socket,client_addr)
+        
+    def getDestination(self):
+        destination = ""
+        for line in self.data:
+            if rx_to.search(line):
+                md = rx_uri.search(line)
+                if md:
+                    destination = "%s@%s" %(md.group(1),md.group(2))
+                break
+        return destination
+                
+    def getOrigin(self):
+        origin = ""
+        for line in self.data:
+            if rx_from.search(line):
+                md = rx_uri.search(line)
+                if md:
+                    origin = "%s@%s" %(md.group(1),md.group(2))
+                break
+        return origin
+        
+    """                
     def parseRequest(self):
         destination = ""
         origin = ""
@@ -104,6 +142,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             if md:
                 callid = md.group(1)
         return (origin, destination, callid, branch)
+    """
         
     def sendResponse(self,code):
         request_uri = "SIP/2.0 " + code
@@ -159,25 +198,13 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         print "-----------------"
         print " INVITE received "
         print "-----------------"
-        origin,destination,callid,branch = self.parseRequest()
+        destination = self.getDestination()
         if len(destination) > 0:
             print "destination %s" % destination
             if registrar.has_key(destination):
-                addr,port,socket,claddr = self.uriToAddress(destination)
-                print "Send INVITE to %s:%s" %(addr,port)
-                # change request uri
-                #md = rx_request_uri.search(self.data[0])
-                #if md:
-                #    method = md.group(1)
-                #    uri = md.group(2)
-                #    if registrar.has_key(uri):
-                #        uri = "sip:%s" % registrar[uri]
-                #        self.data[0] = "%s %s SIP/2.0" % (method,uri)
-                # delete Route
-                data = []
-                for line in self.data:
-                    if not rx_route.search(line):
-                        data.append(line)
+                socket,claddr = self.getSocketInfo(destination)
+                #self.changeRequestUri()
+                data = self.removeRouteHeader()
                 #insert Record-Route
                 data.insert(1,recordroute)
                 text = string.join(data,"\r\n")
@@ -192,16 +219,13 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         print "--------------"
         print " ACK received "
         print "--------------"
-        origin,destination,callid,branch = self.parseRequest()
+        destination = self.getDestination()
         if len(destination) > 0:
             print "destination %s" % destination
             if registrar.has_key(destination):
-                addr,port,socket,claddr = self.uriToAddress(destination)
-                # delete Route
-                data = []
-                for line in self.data:
-                    if not rx_route.search(line):
-                        data.append(line)
+                socket,claddr = self.getSocketInfo(destination)
+                data = self.removeRouteHeader()
+                #insert Record-Route
                 data.insert(1,recordroute)
                 text = string.join(data,"\r\n")
                 socket.sendto(text,claddr)
@@ -212,16 +236,13 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         print "-----------------"
         print " CANCEL received "
         print "-----------------"
-        origin,destination,callid,branch = self.parseRequest()
+        destination = self.getDestination()
         if len(destination) > 0:
             print "destination %s" % destination
             if registrar.has_key(destination):
-                addr,port,socket,claddr = self.uriToAddress(destination)
-               # delete Route
-                data = []
-                for line in self.data:
-                    if not rx_route.search(line):
-                        data.append(line)
+                socket,claddr = self.getSocketInfo(destination)
+                data = self.removeRouteHeader()
+                #insert Record-Route
                 data.insert(1,recordroute)
                 text = string.join(data,"\r\n")
                 socket.sendto(text,claddr)
@@ -230,29 +251,17 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 return
         self.sendResponse("404 Not Found")
                 
-    def processTransaction(self):
+    def processNonInvite(self):
         print "----------------------"
-        print " Transaction received "
+        print " NonInvite received "
         print "----------------------"
-        origin,destination,callid,branch = self.parseRequest()
+        destination = self.getDestination()
         if len(destination) > 0:
             print "destination %s" % destination
             if registrar.has_key(destination):
-                addr,port,socket,claddr = self.uriToAddress(destination)
-                print "Send Transaction to %s:%s" %(addr,port)
-                # change request uri
-                # md = rx_request_uri.search(self.data[0])
-                # if md:
-                # method = md.group(1)
-                # uri = md.group(2)
-                # if registrar.has_key(uri):
-                # uri = "sip:%s" % registrar[uri]
-                # self.data[0] = "%s %s SIP/2.0" % (method,uri)
-                # delete Route
-                data = []
-                for line in self.data:
-                    if not rx_route.search(line):
-                        data.append(line)
+                socket,claddr = self.getSocketInfo(destination)
+                #self.changeRequestUri()
+                data = self.removeRouteHeader()
                 #insert Record-Route
                 data.insert(1,recordroute)
                 text = string.join(data,"\r\n")
@@ -263,17 +272,12 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 self.sendResponse("406 Not Acceptable")
                 
     def processCode(self):
-        origin,destination,callid,branch = self.parseRequest()
+        origin = self.getOrigin()
         if len(origin) > 0:
             print "origin %s" % origin
             if registrar.has_key(origin):
-                addr,port,socket,claddr = self.uriToAddress(origin)
-                # delete Route
-                data = []
-                for line in self.data:
-                    if not rx_route.search(line):
-                        data.append(line)
-                #data.insert(1,recordroute)
+                socket,claddr = self.getSocketInfo(origin)
+                data = self.removeRouteHeader()
                 text = string.join(data,"\r\n")
                 socket.sendto(text,claddr)
                 showtime()
@@ -290,17 +294,17 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             elif rx_ack.search(request_uri):
                 self.processAck()
             elif rx_bye.search(request_uri):
-                self.processTransaction()
+                self.processNonInvite()
             elif rx_cancel.search(request_uri):
                 self.processCancel()
             elif rx_options.search(request_uri):
-                self.processTransaction()
+                self.processNonInvite()
             elif rx_info.search(request_uri):
-                self.processTransaction()
+                self.processNonInvite()
             elif rx_message.search(request_uri):
-                self.processTransaction()
+                self.processNonInvite()
             elif rx_refer.search(request_uri):
-                self.processTransaction()
+                self.processNonInvite()
             elif rx_subscribe.search(request_uri):
                 self.sendResponse("200 0K")
             elif rx_publish.search(request_uri):
@@ -309,20 +313,11 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 self.sendResponse("200 0K")
             elif rx_code.search(request_uri):
                 self.processCode()
-                #print "unexpected code: %s" % request_uri
             else:
                 print "request_uri %s"     % request_uri          
                 #print "message %s unknown" % self.data
-
-    """
-    def setup(self):
-        pass
-        #print "setup"
-    """
     
     def handle(self):
-        #print "handle"
-        #print self.server
         #socket.setdefaulttimeout(120)
         data = self.request[0]
         self.data = data.split("\r\n")
@@ -339,15 +334,8 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 hexdump(data,' ',16)
                 print "---"
 
-    """
-    def finish(self):
-        pass
-        #print "finish"
-        #self.socket.close()
-    """
 if __name__ == "__main__":    
     print time.strftime("%a, %d %b %Y %H:%M:%S ", time.localtime())
-    #HOST, PORT = "127.0.0.1", 5060
     hostname = socket.gethostname()
     print hostname
     ipaddress = socket.gethostbyname(hostname)
