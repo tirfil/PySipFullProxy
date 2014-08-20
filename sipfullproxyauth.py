@@ -43,7 +43,7 @@ rx_contentlength = re.compile("^Content-Length:")
 #rx_branch = re.compile(";branch=([^;]*)")
 rx_contact_expires = re.compile("expires=([^;$]*)")
 rx_expires = re.compile("^Expires: (.*)$")
-rx_authorization = re.compile("^Authorization: Digest (.*)")
+rx_authorization = re.compile("^Authorization: +Digest (.*)")
 rx_kv= re.compile("([^=]*)=(.*)")
 
 # global dictionnary
@@ -232,6 +232,9 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         expires = 0
         validity = 0
         authorization = ""
+        index = 0
+        auth_index = 0
+        data = []
         size = len(self.data)
         for line in self.data:
             if rx_to.search(line):
@@ -252,9 +255,17 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             md = rx_expires.search(line)
             if md:
                 header_expires = md.group(1)
+            
             md = rx_authorization.search(line)
             if md:
                 authorization= md.group(1)
+                auth_index = index
+                #print authorization
+            index += 1
+            
+        # remove Authorization header for response
+        if auth_index > 0:
+            self.data.pop(auth_index)
                 
         if len(authorization)> 0 and auth.has_key(fromm):
             nonce = auth[fromm]
