@@ -19,9 +19,12 @@ rx_info = re.compile("^INFO")
 rx_message = re.compile("^MESSAGE")
 rx_refer = re.compile("^REFER")
 rx_from = re.compile("^From:")
+rx_cfrom = re.compile("^f:")
 rx_to = re.compile("^To:")
+rx_cto = re.compile("^t:")
 rx_tag = re.compile(";tag")
 rx_contact = re.compile("^Contact:")
+rx_ccontact = re.compile("^m:")
 rx_uri = re.compile("sip:([^@]*)@([^;>$]*)")
 rx_addr = re.compile("sip:([^ ;>$]*)")
 #rx_addrport = re.compile("([^:]*):(.*)")
@@ -34,7 +37,9 @@ rx_invalid2 = re.compile("^10\.")
 rx_request_uri = re.compile("^([^ ]*) sip:([^ ]*) SIP/2.0")
 rx_route = re.compile("^Route:")
 rx_contentlength = re.compile("^Content-Length:")
+rx_ccontentlength = re.compile("^l:")
 #rx_via = re.compile("^Via:")
+#rx_cvia = re.compile("^v:")
 #rx_branch = re.compile(";branch=([^;]*)")
 rx_contact_expires = re.compile("expires=([^;$]*)")
 rx_expires = re.compile("^Expires: (.*)$")
@@ -115,7 +120,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
     def getDestination(self):
         destination = ""
         for line in self.data:
-            if rx_to.search(line):
+            if rx_to.search(line) or rx_cto.search(line):
                 md = rx_uri.search(line)
                 if md:
                     destination = "%s@%s" %(md.group(1),md.group(2))
@@ -125,7 +130,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
     def getOrigin(self):
         origin = ""
         for line in self.data:
-            if rx_from.search(line):
+            if rx_from.search(line) or rx_cfrom.search(line):
                 md = rx_uri.search(line)
                 if md:
                     origin = "%s@%s" %(md.group(1),md.group(2))
@@ -164,11 +169,13 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         data = []
         for line in self.data:
             data.append(line)
-            if rx_to.search(line):
+            if rx_to.search(line) or rx_cto.search(line):
                 if not rx_tag.search(line):
                     data[index] = "%s%s" % (line,";tag=123456")
             if rx_contentlength.search(line):
                 data[index]="Content-Length: 0"
+            if rx_ccontentlength.search(line):
+                data[index]="l: 0"
             index += 1
             if line == "":
                 break
@@ -187,11 +194,11 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         validity = 0
         size = len(self.data)
         for line in self.data:
-            if rx_to.search(line):
+            if rx_to.search(line) or rx_cto.search(line):
                 md = rx_uri.search(line)
                 if md:
                     fromm = "%s@%s" % (md.group(1),md.group(2))
-            if rx_contact.search(line):
+            if rx_contact.search(line) or rx_ccontact.search(line):
                 md = rx_uri.search(line)
                 if md:
                     contact = md.group(2)
@@ -236,6 +243,10 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         print "-----------------"
         print " INVITE received "
         print "-----------------"
+        origin = self.getOrigin()
+        if len(origin) == 0 or not registrar.has_key(origin):
+            self.sendResponse("400 Bad Request")
+            return
         destination = self.getDestination()
         if len(destination) > 0:
             print "destination %s" % destination
@@ -253,7 +264,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             else:
                 self.sendResponse("480 Temporarily Unavailable")
         else:
-            self.sendresponse("500 Server Internal Error")
+            self.sendResponse("500 Server Internal Error")
                 
     def processAck(self):
         print "--------------"
@@ -276,6 +287,10 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         print "----------------------"
         print " NonInvite received "
         print "----------------------"
+        origin = self.getOrigin()
+        if len(origin) == 0 or not registrar.has_key(origin):
+            self.sendResponse("400 Bad Request")
+            return
         destination = self.getDestination()
         if len(destination) > 0:
             print "destination %s" % destination
@@ -292,7 +307,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             else:
                 self.sendResponse("406 Not Acceptable")
         else:
-            self.sendresponse("500 Server Internal Error")
+            self.sendResponse("500 Server Internal Error")
                 
     def processCode(self):
         origin = self.getOrigin()
