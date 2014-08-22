@@ -270,9 +270,16 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 #print authorization
             index += 1
             
+        if rx_invalid.search(contact) or rx_invalid2.search(contact):
+            if registrar.has_key(fromm):
+                del registrar[fromm]
+            self.sendResponse("488 Not Acceptable Here")    
+            return
+            
         # remove Authorization header for response
         if auth_index > 0:
             self.data.pop(auth_index)
+           
                 
         if len(authorization)> 0 and auth.has_key(fromm):
             nonce = auth[fromm]
@@ -301,22 +308,22 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             now = int(time.time())
             validity = now + expires
             
-        if rx_invalid.search(contact) or rx_invalid2.search(contact):
-            if registrar.has_key(fromm):
-                del registrar[fromm]
-            self.sendResponse("488 Not Acceptable Here")
-        else:
-            print "From: %s - Contact: %s" % (fromm,contact)
-            print "Client address: %s:%s" % self.client_address
-            print "Expires= %d" % expires
-            registrar[fromm]=[contact,self.socket,self.client_address,validity]
-            self.debugRegister()
-            self.sendResponse("200 0K")
+    
+        print "From: %s - Contact: %s" % (fromm,contact)
+        print "Client address: %s:%s" % self.client_address
+        print "Expires= %d" % expires
+        registrar[fromm]=[contact,self.socket,self.client_address,validity]
+        self.debugRegister()
+        self.sendResponse("200 0K")
         
     def processInvite(self):
         print "-----------------"
         print " INVITE received "
         print "-----------------"
+        origin = self.getOrigin()
+        if len(origin) == 0 or not registrar.has_key(origin):
+            self.sendResponse("400 Bad Request")
+            return
         destination = self.getDestination()
         if len(destination) > 0:
             print "destination %s" % destination
@@ -357,6 +364,10 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         print "----------------------"
         print " NonInvite received "
         print "----------------------"
+        origin = self.getOrigin()
+        if len(origin) == 0 or not registrar.has_key(origin):
+            self.sendResponse("400 Bad Request")
+            return
         destination = self.getDestination()
         if len(destination) > 0:
             print "destination %s" % destination
