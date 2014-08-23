@@ -43,9 +43,10 @@ rx_request_uri = re.compile("^([^ ]*) sip:([^ ]*) SIP/2.0")
 rx_route = re.compile("^Route:")
 rx_contentlength = re.compile("^Content-Length:")
 rx_ccontentlength = re.compile("^l:")
-#rx_via = re.compile("^Via:")
-#rx_cvia = re.compile("^v:")
+rx_via = re.compile("^Via:")
+rx_cvia = re.compile("^v:")
 #rx_branch = re.compile(";branch=([^;]*)")
+rx_rport = re.compile(";rport$|;rport;")
 rx_contact_expires = re.compile("expires=([^;$]*)")
 rx_expires = re.compile("^Expires: (.*)$")
 rx_authorization = re.compile("^Authorization: +Digest (.*)")
@@ -218,6 +219,11 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             if rx_to.search(line) or rx_cto.search(line):
                 if not rx_tag.search(line):
                     data[index] = "%s%s" % (line,";tag=123456")
+            if rx_via.search(line) or rx_cvia.search(line):
+                # rport processing
+                if rx_rport.search(line):
+                    text = "received=%s;rport=%d" % self.client_address
+                    data[index] = line.replace("rport",text)        
             if rx_contentlength.search(line):
                 data[index]="Content-Length: 0"
             if rx_ccontentlength.search(line):
@@ -443,7 +449,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             print "---\n>> server received [%d]:\n%s\n---" %  (len(data),data)
             self.processRequest()
         else:
-            if len(data) != 4:
+            if len(data) > 4:
                 showtime()
                 print "---\n>> server received [%d]:" % len(data)
                 hexdump(data,' ',16)
