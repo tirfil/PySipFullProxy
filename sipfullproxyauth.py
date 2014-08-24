@@ -45,7 +45,7 @@ rx_contentlength = re.compile("^Content-Length:")
 rx_ccontentlength = re.compile("^l:")
 rx_via = re.compile("^Via:")
 rx_cvia = re.compile("^v:")
-#rx_branch = re.compile(";branch=([^;]*)")
+rx_branch = re.compile(";branch=([^;]*)")
 rx_rport = re.compile(";rport$|;rport;")
 rx_contact_expires = re.compile("expires=([^;$]*)")
 rx_expires = re.compile("^Expires: (.*)$")
@@ -56,6 +56,7 @@ rx_kv= re.compile("([^=]*)=(.*)")
 recordroute = ""
 registrar = {}
 auth = {}
+branchvia = {}
 
 def hexdump( chars, sep, width ):
     while chars:
@@ -146,6 +147,22 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             if not rx_route.search(line):
                 data.append(line)
         return data
+
+    def processVia(self):
+        branch= ""
+        for line in self.data:
+            if rx_via.search(line) or rx_cvia.search(line):
+                # rport processing
+                if rx_rport.search(line):
+                    text = "received=%s;rport=%d" % self.client_address
+                    via = line.replace("rport",text)   
+                else:
+                    text = "received=%s" % self.client_address[0]
+                    via = "%s;%s" % (line,text)
+                md = rx_branch.search(line)
+                if md:
+                    branch=md.group(1)
+                return (branch, via)
         
     def checkValidity(self,uri):
         addrport, socket, client_addr, validity = registrar[uri]
@@ -180,8 +197,6 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                     origin = "%s@%s" %(md.group(1),md.group(2))
                 break
         return origin
-        
-
         
         
     """                
@@ -223,7 +238,10 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 # rport processing
                 if rx_rport.search(line):
                     text = "received=%s;rport=%d" % self.client_address
-                    data[index] = line.replace("rport",text)        
+                    data[index] = line.replace("rport",text) 
+                else:
+                    text = "received=%s" % self.client_address[0]
+                    data[index] = "%s;%s" % (line,text)      
             if rx_contentlength.search(line):
                 data[index]="Content-Length: 0"
             if rx_ccontentlength.search(line):
@@ -336,6 +354,8 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             if registrar.has_key(destination) and self.checkValidity(destination):
                 socket,claddr = self.getSocketInfo(destination)
                 #self.changeRequestUri()
+                branch, via = self.processVia()
+                branchvia[branch]=via
                 data = self.removeRouteHeader()
                 #insert Record-Route
                 data.insert(1,recordroute)
@@ -343,7 +363,6 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 socket.sendto(text , claddr)
                 showtime()
                 print "---\n<< server send [%d]:\n%s\n---" % (len(text),text)
-                
             else:
                 self.sendResponse("480 Temporarily Unavailable")
         else:
@@ -380,6 +399,8 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             if registrar.has_key(destination) and self.checkValidity(destination):
                 socket,claddr = self.getSocketInfo(destination)
                 #self.changeRequestUri()
+                branch, via = self.processVia()
+                branchvia[branch]=via
                 data = self.removeRouteHeader()
                 #insert Record-Route
                 data.insert(1,recordroute)
@@ -398,7 +419,28 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             print "origin %s" % origin
             if registrar.has_key(origin):
                 socket,claddr = self.getSocketInfo(origin)
-                data = self.removeRouteHeader()
+                self.data = self.removeRouteHeader()
+                # retreive via from branch
+                data = []
+                code = 0
+                for line in self.data:
+                    md = rx_code.search(line)
+                    if md:
+                        code = int(md.group(1))
+                    if rx_via.search(line) or rx_cvia.search(line):
+                        md = rx_branch.search(line)
+                        if md:
+                            branch = md.group(1)
+                            if branchvia.has_key(branch):
+                                via  = branchvia[branch]
+                                data.append(via)
+                                # clean after final response
+                                if code > 199:
+                                    del branchvia[branch]
+                            else:
+                                data.append(line)
+                    else:
+                        data.append(line)  
                 text = string.join(data,"\r\n")
                 socket.sendto(text,claddr)
                 showtime()
@@ -447,6 +489,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         if rx_request_uri.search(request_uri) or rx_code.search(request_uri):
             showtime()
             print "---\n>> server received [%d]:\n%s\n---" %  (len(data),data)
+            print "Received from %s:%d" % self.client_address
             self.processRequest()
         else:
             if len(data) > 4:
