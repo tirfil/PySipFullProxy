@@ -14,6 +14,7 @@ PASSWORD = "protected"
 rx_register = re.compile("^REGISTER")
 rx_invite = re.compile("^INVITE")
 rx_ack = re.compile("^ACK")
+rx_prack = re.compile("^PRACK")
 rx_cancel = re.compile("^CANCEL")
 rx_bye = re.compile("^BYE")
 rx_options = re.compile("^OPTIONS")
@@ -166,7 +167,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 else:
                     text = "received=%s" % self.client_address[0]
                     via = "%s;%s" % (line,text)
-                data.append(line)
+                data.append(via)
             else:
                 data.append(line)
         return data
@@ -507,6 +508,8 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             elif rx_message.search(request_uri):
                 self.processNonInvite()
             elif rx_refer.search(request_uri):
+                self.processNonInvite()
+            elif rx_prack.search(request_uri):
                 self.processNonInvite()
             elif rx_subscribe.search(request_uri):
                 self.sendResponse("200 0K")
