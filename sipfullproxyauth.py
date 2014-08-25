@@ -148,7 +148,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 data.append(line)
         return data
 
-    def processVia(self):
+    def saveModifiedVia(self):
         branch= ""
         for line in self.data:
             if rx_via.search(line) or rx_cvia.search(line):
@@ -162,7 +162,30 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 md = rx_branch.search(line)
                 if md:
                     branch=md.group(1)
-                return (branch, via)
+                branchvia[branch]=via
+                
+    def loadModifiedVia(self):
+        data = []
+        code = 0
+        for line in self.data:
+            md = rx_code.search(line)
+            if md:
+                code = int(md.group(1))
+            if rx_via.search(line) or rx_cvia.search(line):
+                md = rx_branch.search(line)
+                if md:
+                    branch = md.group(1)
+                    if branchvia.has_key(branch):
+                        via  = branchvia[branch]
+                        data.append(via)
+                        # clean after final response
+                        if code > 199:
+                            del branchvia[branch]
+                    else:
+                        data.append(line)
+            else:
+                data.append(line)
+        return data
         
     def checkValidity(self,uri):
         addrport, socket, client_addr, validity = registrar[uri]
@@ -354,8 +377,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             if registrar.has_key(destination) and self.checkValidity(destination):
                 socket,claddr = self.getSocketInfo(destination)
                 #self.changeRequestUri()
-                branch, via = self.processVia()
-                branchvia[branch]=via
+                self.saveModifiedVia()
                 data = self.removeRouteHeader()
                 #insert Record-Route
                 data.insert(1,recordroute)
@@ -399,8 +421,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             if registrar.has_key(destination) and self.checkValidity(destination):
                 socket,claddr = self.getSocketInfo(destination)
                 #self.changeRequestUri()
-                branch, via = self.processVia()
-                branchvia[branch]=via
+                self.saveModifiedVia()
                 data = self.removeRouteHeader()
                 #insert Record-Route
                 data.insert(1,recordroute)
@@ -420,27 +441,8 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             if registrar.has_key(origin):
                 socket,claddr = self.getSocketInfo(origin)
                 self.data = self.removeRouteHeader()
-                # retreive via from branch
-                data = []
-                code = 0
-                for line in self.data:
-                    md = rx_code.search(line)
-                    if md:
-                        code = int(md.group(1))
-                    if rx_via.search(line) or rx_cvia.search(line):
-                        md = rx_branch.search(line)
-                        if md:
-                            branch = md.group(1)
-                            if branchvia.has_key(branch):
-                                via  = branchvia[branch]
-                                data.append(via)
-                                # clean after final response
-                                if code > 199:
-                                    del branchvia[branch]
-                            else:
-                                data.append(line)
-                    else:
-                        data.append(line)  
+                # retrieve via from branch
+                data = self.loadModifiedVia() 
                 text = string.join(data,"\r\n")
                 socket.sendto(text,claddr)
                 showtime()
