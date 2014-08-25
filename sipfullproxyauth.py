@@ -54,6 +54,7 @@ rx_kv= re.compile("([^=]*)=(.*)")
 
 # global dictionnary
 recordroute = ""
+topvia = ""
 registrar = {}
 auth = {}
 branchvia = {}
@@ -147,6 +148,38 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             if not rx_route.search(line):
                 data.append(line)
         return data
+    
+    def addTopVia(self):
+        branch= ""
+        data = []
+        for line in self.data:
+            if rx_via.search(line) or rx_cvia.search(line):
+                md = rx_branch.search(line)
+                if md:
+                    branch=md.group(1)
+                    via = "%s;branch=%sm" % (topvia, branch)
+                    data.append(via)
+                # rport processing
+                if rx_rport.search(line):
+                    text = "received=%s;rport=%d" % self.client_address
+                    via = line.replace("rport",text)   
+                else:
+                    text = "received=%s" % self.client_address[0]
+                    via = "%s;%s" % (line,text)
+                data.append(line)
+            else:
+                data.append(line)
+        return data
+                
+    def removeTopVia(self):
+        data = []
+        for line in self.data:
+            if rx_via.search(line) or rx_cvia.search(line):
+                if not line.startswith(topvia):
+                    data.append(line)
+            else:
+                data.append(line)
+        return data
 
     def saveModifiedVia(self):
         branch= ""
@@ -163,6 +196,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 if md:
                     branch=md.group(1)
                 branchvia[branch]=via
+                return
                 
     def loadModifiedVia(self):
         data = []
@@ -182,6 +216,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                         if code > 199:
                             del branchvia[branch]
                     else:
+                        print "Cannot find request transaction"
                         data.append(line)
             else:
                 data.append(line)
@@ -377,7 +412,8 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             if registrar.has_key(destination) and self.checkValidity(destination):
                 socket,claddr = self.getSocketInfo(destination)
                 #self.changeRequestUri()
-                self.saveModifiedVia()
+                #self.saveModifiedVia()
+                self.data = self.addTopVia()
                 data = self.removeRouteHeader()
                 #insert Record-Route
                 data.insert(1,recordroute)
@@ -421,7 +457,8 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             if registrar.has_key(destination) and self.checkValidity(destination):
                 socket,claddr = self.getSocketInfo(destination)
                 #self.changeRequestUri()
-                self.saveModifiedVia()
+                #self.saveModifiedVia()
+                self.data = self.addTopVia()
                 data = self.removeRouteHeader()
                 #insert Record-Route
                 data.insert(1,recordroute)
@@ -442,7 +479,8 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 socket,claddr = self.getSocketInfo(origin)
                 self.data = self.removeRouteHeader()
                 # retrieve via from branch
-                data = self.loadModifiedVia() 
+                # data = self.loadModifiedVia() 
+                data = self.removeTopVia()
                 text = string.join(data,"\r\n")
                 socket.sendto(text,claddr)
                 showtime()
@@ -508,7 +546,7 @@ if __name__ == "__main__":
     if ipaddress == "127.0.0.1":
         ipaddress = sys.argv[1]
     print ipaddress
-
     recordroute = "Record-Route: <sip:%s:%d;lr>" % (ipaddress,PORT)
+    topvia = "Via: SIP/2.0/UDP %s:%d" % (ipaddress,PORT)
     server = SocketServer.UDPServer((HOST, PORT), UDPHandler)
     server.serve_forever()
