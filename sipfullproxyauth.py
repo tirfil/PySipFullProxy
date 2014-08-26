@@ -60,7 +60,6 @@ recordroute = ""
 topvia = ""
 registrar = {}
 auth = {}
-branchvia = {}
 
 def hexdump( chars, sep, width ):
     while chars:
@@ -118,21 +117,6 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         for key in registrar.keys():
             logging.debug("%s -> %s" % (key,registrar[key][0]))
         logging.debug("*****************")
-    
-    """
-    def uriToAddress(self,uri):
-        addr = ""
-        port = 0
-        addrport, socket, client_addr = registrar[uri]
-        md = rx_addrport.match(addrport)
-        if md:
-            addr = md.group(1)
-            port = int(md.group(2))
-        else:
-            addr = addrport
-            port = 5060
-        return (addr,port,socket, client_addr)
-    """
     
     def changeRequestUri(self):
         # change request uri
@@ -217,32 +201,6 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                     origin = "%s@%s" %(md.group(1),md.group(2))
                 break
         return origin
-        
-        
-    """                
-    def parseRequest(self):
-        destination = ""
-        origin = ""
-        callid = ""
-        branch = ""
-        for line in self.data:
-            if rx_via.search(line):
-                md = rx_branch.search(line)
-                if md:
-                    branch = md.group(1)
-            if rx_to.search(line):
-                md = rx_uri.search(line)
-                if md:
-                    destination = "%s@%s" %(md.group(1),md.group(2))
-            if rx_from.search(line):
-                md = rx_uri.search(line)
-                if md:
-                    origin = "%s@%s" %(md.group(1),md.group(2))
-            md = rx_callid.search(line)
-            if md:
-                callid = md.group(1)
-        return (origin, destination, callid, branch)
-    """
         
     def sendResponse(self,code):
         request_uri = "SIP/2.0 " + code
@@ -371,7 +329,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             return
         destination = self.getDestination()
         if len(destination) > 0:
-            logging.debug("destination %s" % destination)
+            logging.info("destination %s" % destination)
             if registrar.has_key(destination) and self.checkValidity(destination):
                 socket,claddr = self.getSocketInfo(destination)
                 #self.changeRequestUri()
@@ -395,7 +353,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         logging.debug("--------------")
         destination = self.getDestination()
         if len(destination) > 0:
-            logging.debug("destination %s" % destination)
+            logging.info("destination %s" % destination)
             if registrar.has_key(destination):
                 socket,claddr = self.getSocketInfo(destination)
                 data = self.removeRouteHeader()
@@ -417,7 +375,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             return
         destination = self.getDestination()
         if len(destination) > 0:
-            logging.debug("destination %s" % destination)
+            logging.info("destination %s" % destination)
             if registrar.has_key(destination) and self.checkValidity(destination):
                 socket,claddr = self.getSocketInfo(destination)
                 #self.changeRequestUri()
