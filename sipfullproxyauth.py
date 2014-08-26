@@ -7,6 +7,7 @@ import sys
 import time
 import hashlib
 import random
+import logging
 
 HOST, PORT = '0.0.0.0', 5060
 PASSWORD = "protected"
@@ -24,6 +25,7 @@ rx_notify = re.compile("^NOTIFY")
 rx_info = re.compile("^INFO")
 rx_message = re.compile("^MESSAGE")
 rx_refer = re.compile("^REFER")
+rx_update = re.compile("^UPDATE")
 rx_from = re.compile("^From:")
 rx_cfrom = re.compile("^f:")
 rx_to = re.compile("^To:")
@@ -65,13 +67,13 @@ def hexdump( chars, sep, width ):
         line = chars[:width]
         chars = chars[width:]
         line = line.ljust( width, '\000' )
-        print "%s%s%s" % ( sep.join( "%02x" % ord(c) for c in line ),sep, quotechars( line ))
+        logging.debug("%s%s%s" % ( sep.join( "%02x" % ord(c) for c in line ),sep, quotechars( line )))
 
 def quotechars( chars ):
 	return ''.join( ['.', c][c.isalnum()] for c in chars )
 
 def showtime():
-    print time.strftime("(%H:%M:%S)", time.localtime())
+    logging.debug(time.strftime("(%H:%M:%S)", time.localtime()))
     
 def generateNonce(n):
     str = "0123456789abcdef"
@@ -93,7 +95,7 @@ def checkAuthorization(authorization, password, nonce):
             hash[key]=value
     # check nonce (response/request)
     if hash["nonce"] != nonce:
-        print "Incorrect nonce"
+        logging.warning("Incorrect nonce")
         return False
     a1="%s:%s:%s" % (hash["username"],hash["realm"],password)
     a2="REGISTER:%s" % hash["uri"]
@@ -102,20 +104,20 @@ def checkAuthorization(authorization, password, nonce):
     b = "%s:%s:%s" % (ha1,nonce,ha2)
     expected = hashlib.md5(b).hexdigest()
     if expected == hash["response"]:
-        print "Authentication succeeded"
+        logging.debug("Authentication succeeded")
         return True
-    print "expected= %s" % expected
-    print "response= %s" % hash["response"]
+    logging.warning("expected= %s" % expected)
+    logging.warning("response= %s" % hash["response"])
     return False
 
 class UDPHandler(SocketServer.BaseRequestHandler):   
     
     def debugRegister(self):
-        print "\n*** REGISTRAR ***"
-        print "*****************"
+        logging.debug("*** REGISTRAR ***")
+        logging.debug("*****************")
         for key in registrar.keys():
-            print "%s -> %s" % (key,registrar[key][0])
-        print "*****************"
+            logging.debug("%s -> %s" % (key,registrar[key][0]))
+        logging.debug("*****************")
     
     """
     def uriToAddress(self,uri):
@@ -181,47 +183,6 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             else:
                 data.append(line)
         return data
-
-    def saveModifiedVia(self):
-        branch= ""
-        for line in self.data:
-            if rx_via.search(line) or rx_cvia.search(line):
-                # rport processing
-                if rx_rport.search(line):
-                    text = "received=%s;rport=%d" % self.client_address
-                    via = line.replace("rport",text)   
-                else:
-                    text = "received=%s" % self.client_address[0]
-                    via = "%s;%s" % (line,text)
-                md = rx_branch.search(line)
-                if md:
-                    branch=md.group(1)
-                branchvia[branch]=via
-                return
-                
-    def loadModifiedVia(self):
-        data = []
-        code = 0
-        for line in self.data:
-            md = rx_code.search(line)
-            if md:
-                code = int(md.group(1))
-            if rx_via.search(line) or rx_cvia.search(line):
-                md = rx_branch.search(line)
-                if md:
-                    branch = md.group(1)
-                    if branchvia.has_key(branch):
-                        via  = branchvia[branch]
-                        data.append(via)
-                        # clean after final response
-                        if code > 199:
-                            del branchvia[branch]
-                    else:
-                        print "Cannot find request transaction"
-                        data.append(line)
-            else:
-                data.append(line)
-        return data
         
     def checkValidity(self,uri):
         addrport, socket, client_addr, validity = registrar[uri]
@@ -230,7 +191,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             return True
         else:
             del registrar[uri]
-            print "registration for %s has expired" % uri
+            logging.warning("registration for %s has expired" % uri)
             return False
     
     def getSocketInfo(self,uri):
@@ -312,7 +273,8 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         text = string.join(data,"\r\n")
         self.socket.sendto(text,self.client_address)
         showtime()
-        print "---\n<< server send [%d]:\n%s\n---" % (len(text),text)
+        logging.info("<<< %s" % data[0])
+        logging.debug("---\n<< server send [%d]:\n%s\n---" % (len(text),text))
         
     def processRegister(self):
         fromm = ""
@@ -392,28 +354,27 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             validity = now + expires
             
     
-        print "From: %s - Contact: %s" % (fromm,contact)
-        print "Client address: %s:%s" % self.client_address
-        print "Expires= %d" % expires
+        logging.info("From: %s - Contact: %s" % (fromm,contact))
+        logging.debug("Client address: %s:%s" % self.client_address)
+        logging.debug("Expires= %d" % expires)
         registrar[fromm]=[contact,self.socket,self.client_address,validity]
         self.debugRegister()
         self.sendResponse("200 0K")
         
     def processInvite(self):
-        print "-----------------"
-        print " INVITE received "
-        print "-----------------"
+        logging.debug("-----------------")
+        logging.debug(" INVITE received ")
+        logging.debug("-----------------")
         origin = self.getOrigin()
         if len(origin) == 0 or not registrar.has_key(origin):
             self.sendResponse("400 Bad Request")
             return
         destination = self.getDestination()
         if len(destination) > 0:
-            print "destination %s" % destination
+            logging.debug("destination %s" % destination)
             if registrar.has_key(destination) and self.checkValidity(destination):
                 socket,claddr = self.getSocketInfo(destination)
                 #self.changeRequestUri()
-                #self.saveModifiedVia()
                 self.data = self.addTopVia()
                 data = self.removeRouteHeader()
                 #insert Record-Route
@@ -421,19 +382,20 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 text = string.join(data,"\r\n")
                 socket.sendto(text , claddr)
                 showtime()
-                print "---\n<< server send [%d]:\n%s\n---" % (len(text),text)
+                logging.info("<<< %s" % data[0])
+                logging.debug("---\n<< server send [%d]:\n%s\n---" % (len(text),text))
             else:
                 self.sendResponse("480 Temporarily Unavailable")
         else:
             self.sendResponse("500 Server Internal Error")
                 
     def processAck(self):
-        print "--------------"
-        print " ACK received "
-        print "--------------"
+        logging.debug("--------------")
+        logging.debug(" ACK received ")
+        logging.debug("--------------")
         destination = self.getDestination()
         if len(destination) > 0:
-            print "destination %s" % destination
+            logging.debug("destination %s" % destination)
             if registrar.has_key(destination):
                 socket,claddr = self.getSocketInfo(destination)
                 data = self.removeRouteHeader()
@@ -442,23 +404,23 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 text = string.join(data,"\r\n")
                 socket.sendto(text,claddr)
                 showtime()
-                print "---\n<< server send [%d]:\n%s\n---" % (len(text),text)
+                logging.info("<<< %s" % data[0])
+                logging.debug( "---\n<< server send [%d]:\n%s\n---" % (len(text),text))
                 
     def processNonInvite(self):
-        print "----------------------"
-        print " NonInvite received "
-        print "----------------------"
+        logging.debug("----------------------")
+        logging.debug(" NonInvite received   ")
+        logging.debug("----------------------")
         origin = self.getOrigin()
         if len(origin) == 0 or not registrar.has_key(origin):
             self.sendResponse("400 Bad Request")
             return
         destination = self.getDestination()
         if len(destination) > 0:
-            print "destination %s" % destination
+            logging.debug("destination %s" % destination)
             if registrar.has_key(destination) and self.checkValidity(destination):
                 socket,claddr = self.getSocketInfo(destination)
                 #self.changeRequestUri()
-                #self.saveModifiedVia()
                 self.data = self.addTopVia()
                 data = self.removeRouteHeader()
                 #insert Record-Route
@@ -466,7 +428,8 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 text = string.join(data,"\r\n")
                 socket.sendto(text , claddr)
                 showtime()
-                print "---\n<< server send [%d]:\n%s\n---" % (len(text),text)    
+                logging.info("<<< %s" % data[0])
+                logging.debug("---\n<< server send [%d]:\n%s\n---" % (len(text),text))    
             else:
                 self.sendResponse("406 Not Acceptable")
         else:
@@ -475,17 +438,17 @@ class UDPHandler(SocketServer.BaseRequestHandler):
     def processCode(self):
         origin = self.getOrigin()
         if len(origin) > 0:
-            print "origin %s" % origin
+            logging.debug("origin %s" % origin)
             if registrar.has_key(origin):
                 socket,claddr = self.getSocketInfo(origin)
                 self.data = self.removeRouteHeader()
-                # retrieve via from branch
-                # data = self.loadModifiedVia() 
                 data = self.removeTopVia()
                 text = string.join(data,"\r\n")
                 socket.sendto(text,claddr)
                 showtime()
-                print "---\n<< server send [%d]:\n%s\n---" % (len(text),text)
+                logging.info("<<< %s" % data[0])
+                logging.debug("---\n<< server send [%d]:\n%s\n---" % (len(text),text))
+                
                 
     def processRequest(self):
         #print "processRequest"
@@ -511,6 +474,8 @@ class UDPHandler(SocketServer.BaseRequestHandler):
                 self.processNonInvite()
             elif rx_prack.search(request_uri):
                 self.processNonInvite()
+            elif rx_update.search(request_uri):
+                self.processNonInvite()
             elif rx_subscribe.search(request_uri):
                 self.sendResponse("200 0K")
             elif rx_publish.search(request_uri):
@@ -520,7 +485,7 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             elif rx_code.search(request_uri):
                 self.processCode()
             else:
-                print "request_uri %s"     % request_uri          
+                logging.error("request_uri %s" % request_uri)          
                 #print "message %s unknown" % self.data
     
     def handle(self):
@@ -531,24 +496,27 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         request_uri = self.data[0]
         if rx_request_uri.search(request_uri) or rx_code.search(request_uri):
             showtime()
-            print "---\n>> server received [%d]:\n%s\n---" %  (len(data),data)
-            print "Received from %s:%d" % self.client_address
+            logging.info(">>> %s" % request_uri)
+            logging.debug("---\n>> server received [%d]:\n%s\n---" %  (len(data),data))
+            logging.debug("Received from %s:%d" % self.client_address)
             self.processRequest()
         else:
             if len(data) > 4:
                 showtime()
-                print "---\n>> server received [%d]:" % len(data)
+                logging.info
+                logging.warning("---\n>> server received [%d]:" % len(data))
                 hexdump(data,' ',16)
-                print "---"
+                logging.warning("---")
 
 if __name__ == "__main__":    
-    print time.strftime("%a, %d %b %Y %H:%M:%S ", time.localtime())
+    logging.basicConfig(format='%(asctime)s:%(levelname)s:%(message)s',filename='proxy.log',level=logging.INFO,datefmt='%H:%M:%S')
+    logging.info(time.strftime("%a, %d %b %Y %H:%M:%S ", time.localtime()))
     hostname = socket.gethostname()
-    print hostname
+    logging.info(hostname)
     ipaddress = socket.gethostbyname(hostname)
     if ipaddress == "127.0.0.1":
         ipaddress = sys.argv[1]
-    print ipaddress
+    logging.info(ipaddress)
     recordroute = "Record-Route: <sip:%s:%d;lr>" % (ipaddress,PORT)
     topvia = "Via: SIP/2.0/UDP %s:%d" % (ipaddress,PORT)
     server = SocketServer.UDPServer((HOST, PORT), UDPHandler)
