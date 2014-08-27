@@ -356,6 +356,8 @@ class UDPHandler(SocketServer.BaseRequestHandler):
             logging.info("destination %s" % destination)
             if registrar.has_key(destination):
                 socket,claddr = self.getSocketInfo(destination)
+                #self.changeRequestUri()
+                self.data = self.addTopVia()
                 data = self.removeRouteHeader()
                 #insert Record-Route
                 data.insert(1,recordroute)
