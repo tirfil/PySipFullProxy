@@ -395,7 +395,6 @@ class UDPHandler(SocketServer.BaseRequestHandler):
         else:
             if len(data) > 4:
                 showtime()
-                logging.info
                 logging.warning("---\n>> server received [%d]:" % len(data))
                 hexdump(data,' ',16)
                 logging.warning("---")
