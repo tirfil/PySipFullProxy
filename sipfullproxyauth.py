@@ -52,7 +52,7 @@ rx_branch = re.compile(";branch=([^;]*)")
 rx_rport = re.compile(";rport$|;rport;")
 rx_contact_expires = re.compile("expires=([^;$]*)")
 rx_expires = re.compile("^Expires: (.*)$")
-rx_authorization = re.compile("^Authorization: +Digest (.*)")
+rx_authorization = re.compile("^Authorization: +\S{6} (.*)")
 rx_kv= re.compile("([^=]*)=(.*)")
 
 # global dictionnary
